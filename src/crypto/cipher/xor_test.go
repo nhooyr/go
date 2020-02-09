@@ -63,48 +63,59 @@ func BenchmarkXORBytes(b *testing.B) {
 	data0 := make([]byte, 1<<15)
 	data1 := make([]byte, 1<<15)
 	sizes := []int64{1 << 3, 1 << 7, 1 << 11, 1 << 15}
+
+	var fns = []struct{
+		name string
+		fn func(dst, a, b []byte) int
+	}{
+		{
+			name: "default",
+			fn: cipher.XorBytes,
+		},
+		{
+			name: "safe",
+			fn:   safeXORBytes,
+		},
+		{
+			name: "fastSafe",
+			fn: fastSafeXORBytes,
+		},
+	}
+
 	for _, size := range sizes {
-		b.Run(fmt.Sprintf("%dBytes", size), func(b *testing.B) {
-			s0 := data0[:size]
-			s1 := data1[:size]
-			b.SetBytes(int64(size))
-			for i := 0; i < b.N; i++ {
-				cipher.XorBytes(dst, s0, s1)
-			}
-		})
+		for _, fn := range fns {
+			b.Run(fn.name, func(b *testing.B) {
+				b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
+					s0 := data0[:size]
+					s1 := data1[:size]
+					b.SetBytes(size)
+					for i := 0; i < b.N; i++ {
+						fn.fn(dst, s0, s1)
+					}
+				})
+			})
+		}
 	}
 }
 
-func BenchmarkSafeXORBytes(b *testing.B) {
-	dst := make([]byte, 1<<15)
-	data0 := make([]byte, 1<<15)
-	data1 := make([]byte, 1<<15)
-	sizes := []int64{1 << 3, 1 << 7, 1 << 11, 1 << 15}
-	for _, size := range sizes {
-		b.Run(fmt.Sprintf("%dBytes", size), func(b *testing.B) {
-			s0 := data0[:size]
-			s1 := data1[:size]
-			b.SetBytes(size)
-			for i := 0; i < b.N; i++ {
-				fastSafeXORBytes(dst, s0, s1, int(size))
-			}
-		})
+func safeXORBytes(dst, a, b []byte) int {
+	if len(a) > len(b) {
+		a = a[:len(b)]
 	}
-}
 
-// n needs to be smaller or equal than the length of a and b.
-func safeXORBytes(dst, a, b []byte, n int) {
-	for i := 0; i < n; i++ {
+	for i := 0; i < len(a); i++ {
 		dst[i] = a[i] ^ b[i]
 	}
+	return len(a)
 }
-
 
 // Unrolled generic version for performance.
 // See https://github.com/golang/go/issues/35381
-func fastSafeXORBytes(dst, a, b []byte, n int) {
-	a = a[:n]
-	b = b[:n]
+func fastSafeXORBytes(dst, a, b []byte) int {
+	if len(a) > len(b) {
+		a = a[:len(b)]
+	}
+	n := len(a)
 
 	// At some point in the future we can clean these unrolled loops up.
 	// See https://github.com/golang/go/issues/31586#issuecomment-487436401
@@ -269,4 +280,6 @@ func fastSafeXORBytes(dst, a, b []byte, n int) {
 	for i := range a {
 		dst[i] = a[i] ^ b[i]
 	}
+
+	return n
 }
